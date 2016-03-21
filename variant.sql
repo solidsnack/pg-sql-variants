@@ -65,7 +65,7 @@ BEGIN
       RETURN NEW;
     END
     $t$ LANGUAGE plpgsql;
-    CREATE TRIGGER $$|| update_trigger ||$$ BEFORE UPDATE OF $$||
+    CREATE TRIGGER $$|| update_trigger ||$$ AFTER UPDATE OF $$||
       quote_cols(pk(variant))
     ||$$ ON $$|| variant ||$$ FOR EACH ROW
     EXECUTE PROCEDURE $$|| update_trigger ||$$();
@@ -78,7 +78,7 @@ BEGIN
     END
     $t$ LANGUAGE plpgsql;
     CREATE TRIGGER $$|| delete_trigger ||$$
-    BEFORE DELETE ON $$|| variant ||$$ FOR EACH ROW
+    AFTER DELETE ON $$|| variant ||$$ FOR EACH ROW
     EXECUTE PROCEDURE $$|| delete_trigger ||$$();
 
   ----- Rebuild the view.
