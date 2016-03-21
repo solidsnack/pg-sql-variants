@@ -1,0 +1,3 @@
+[submodule "macaroon"]
+	path = macaroon
+	url = https://github.com/solidsnack/macaroon.git
