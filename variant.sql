@@ -15,19 +15,25 @@ DECLARE
   update_trigger text := quote_ident(trigger_base||'/u');
   delete_trigger text := quote_ident(trigger_base||'/d');
   ns             text := quote_ident(schemaname(variant));
+  tabs           regclass[];
   selects        text[];
 BEGIN
+  SELECT tables INTO tabs FROM variants WHERE tab = base;
+
+  tabs := COALESCE(tabs, ARRAY[]::regclass[]) || variant;
+
   --- Collect table information now, before changing the search path, to use
   --- for rebuilding the view, later.
-  WITH info AS (SELECT pk.* FROM fk JOIN pk USING (tab) WHERE other = base
-                 UNION
-                SELECT * FROM pk WHERE tab = variant)
   SELECT array_agg($$
     SELECT $$|| quote_cols(cols) ||$$,
            tableoid::regclass,
            row_to_json((tab))
       FROM $$|| tab ||$$ AS tab
-  $$) INTO STRICT selects FROM info;
+  $$) INTO STRICT selects FROM pk NATURAL JOIN unnest(tabs) AS _(tab);
+
+  --- Update metadata table.
+  DELETE FROM variants WHERE tab = base;
+  INSERT INTO variants VALUES (base, tabs);
 
   EXECUTE $$
     SET LOCAL search_path TO $$|| ns ||$$, public;
@@ -91,6 +97,12 @@ BEGIN
   $$;
 END
 $code$ LANGUAGE plpgsql SET search_path FROM CURRENT;
+
+
+CREATE TABLE variants (
+  tab           regclass NOT NULL,
+  tables        regclass[] NOT NULL DEFAULT '{}'
+);
 
 
 CREATE FUNCTION quote_cols(cols name[]) RETURNS text AS $$
