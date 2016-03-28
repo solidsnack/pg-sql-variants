@@ -24,21 +24,45 @@ BEGIN
 
   --- Collect table information now, before changing the search path, to use
   --- for rebuilding the view, later.
+  WITH expanded AS
+   (SELECT tab,
+           array_agg('NULL::'||tab)
+            OVER (ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) AS a,
+           array_agg('NULL::'||tab)
+            OVER (ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) AS z
+      FROM unnest(tabs) AS _(tab))
   SELECT array_agg($$
     SELECT $$|| quote_cols(cols) ||$$,
            tableoid::regclass,
-           row_to_json((tab))
+           $$|| fields ||$$
       FROM $$|| tab ||$$ AS tab
-  $$) INTO STRICT selects FROM pk NATURAL JOIN unnest(tabs) AS _(tab);
+  $$) INTO STRICT selects
+    FROM pk NATURAL JOIN expanded,
+         array_to_string((a[1:cardinality(a)-1] || ARRAY['(tab)'])
+                         || z[2:cardinality(z)], ', ', 'NULL') AS fields;
 
   --- Update metadata table.
   DELETE FROM variants WHERE tab = base;
   INSERT INTO variants VALUES (base, tabs);
 
+  --- Mark base as a variant type.
+  BEGIN
+    EXECUTE $$
+      ALTER TABLE $$|| base ||$$ INHERIT variants.variant;
+    $$;
+  EXCEPTION WHEN duplicate_table THEN END;
+  --- Strange but true: duplicate_table is thrown when we try to inherit from
+  --- a table we already inherit from.
+
   EXECUTE $$
     SET LOCAL search_path TO $$|| ns ||$$, public;
 
   ----- Setup the foreign key linking variant to base.
+
+    --- Ensures constraint will validate at the end of the transaction.
+    INSERT INTO $$|| base ||$$ SELECT $$||
+      quote_cols(pk(variant))
+    ||$$ FROM $$|| variant ||$$;
 
     ALTER TABLE $$|| variant ||$$ ADD FOREIGN KEY ($$||
       quote_cols(pk(variant))
@@ -46,10 +70,6 @@ BEGIN
      REFERENCES $$|| base ||$$
                 ON UPDATE CASCADE ON DELETE CASCADE
                 DEFERRABLE INITIALLY DEFERRED;
-    --- Ensures above constraint will validate at the end of the transaction.
-    INSERT INTO $$|| base ||$$ SELECT $$||
-      quote_cols(pk(variant))
-    ||$$ FROM $$|| variant ||$$;
 
   ----- Create the triggers that propagate changes to base.
 
@@ -89,11 +109,11 @@ BEGIN
 
   ----- Rebuild the view.
 
-    SET LOCAL search_path TO $$|| ns ||$$, public;
     CREATE OR REPLACE VIEW $$|| view_name ||$$ ($$||
       quote_cols(pk(base))
-    ||$$, type, data) AS$$||
-    array_to_string(selects, '   UNION ALL')||$$
+    ||$$, type, $$||
+      quote_cols(tabs)
+    ||$$) AS$$|| array_to_string(selects, '   UNION ALL')||$$
   $$;
 END
 $code$ LANGUAGE plpgsql SET search_path FROM CURRENT;
@@ -105,8 +125,16 @@ CREATE TABLE variants (
 );
 
 
+--- Marker table -- every variant base inherits from this table.
+CREATE TABLE variant ();
+
+
 CREATE FUNCTION quote_cols(cols name[]) RETURNS text AS $$
   SELECT string_agg(quote_ident(col), ', ') FROM unnest(cols) AS col
+$$ LANGUAGE sql IMMUTABLE STRICT;
+
+CREATE FUNCTION quote_cols(cols regclass[]) RETURNS text AS $$
+  SELECT string_agg(quote_ident(tablename(col)), ', ') FROM unnest(cols) AS col
 $$ LANGUAGE sql IMMUTABLE STRICT;
 
 CREATE FUNCTION inserter(cols name[])

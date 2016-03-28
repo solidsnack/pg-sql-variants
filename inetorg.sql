@@ -6,7 +6,7 @@ SET LOCAL search_path TO inetorg, public;
 CREATE TABLE cat (
   license       uuid PRIMARY KEY,
   responds_to   text NOT NULL,
-  doglike       boolean DEFAULT TRUE
+  doglike       boolean NOT NULL DEFAULT TRUE
 );
 
 CREATE TABLE walrus (
@@ -14,6 +14,11 @@ CREATE TABLE walrus (
   nickname      text,
   size          text NOT NULL DEFAULT 'big' CHECK (size IN ('small', 'big')),
   haz_bucket    boolean NOT NULL DEFAULT FALSE
+);
+
+CREATE TABLE dog (
+  license       uuid PRIMARY KEY,
+  spotted       boolean NOT NULL DEFAULT FALSE
 );
 
 CREATE TABLE animal (
