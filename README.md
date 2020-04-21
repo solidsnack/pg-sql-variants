@@ -1,5 +1,159 @@
-Modeling Variant Types in Postgres
-==================================
+How To Use This Repo
+====================
+
+This repo provides utilities to for modeling variant types in Postgres and
+provides a demo schema, as well. To try it out, first use Git to obtain the
+relevant code:
+
+```bash
+:;  git clone git@github.com:solidsnack/pg-sql-variants.git
+:;  cd pg-sql-variants/
+:;  git submodule update --init --recursive
+```
+
+Then load the utilities and the sample schema in Postgres:
+
+```sql
+:;  psql
+Line style is unicode.
+Expanded display is used automatically.
+Null display is "\N".
+Timing is on.
+psql (12.1)
+Type "help" for help.
+
+--# thelyfsoshort@[local]/~
+\i init.psql 
+BEGIN
+...
+COMMIT
+...
+BEGIN
+...
+COMMIT
+...
+BEGIN
+...
+COMMIT
+...
+```
+
+The sample schema helps us to demonstrate a simple polymorhpic datatype: an
+`animal` type with concrete `cat`, `dog` and `walrus` subtypes.
+
+```sql
+--# thelyfsoshort@[local]/~
+SELECT tablename FROM pg_tables WHERE schemaname = 'inetorg';
+ tablename
+───────────
+ cat
+ walrus
+ dog
+ animal
+(4 rows)
+```
+
+Let's setup the variant relationship between the types in the `inetorg`
+namespace with the `variant()` function from the `variants` namespace:
+
+```sql
+--# thelyfsoshort@[local]/~
+SET search_path TO inetorg, variants, "$user", public;
+
+--# thelyfsoshort@[local]/~
+SELECT * FROM variant('animal', 'cat');
+SELECT * FROM variant('animal', 'walrus');
+SELECT * FROM variant('animal', 'dog');
+```
+
+We can see that there are no `animal`s and there are no `cat`s:
+
+```sql
+--# thelyfsoshort@[local]/~
+SELECT * FROM animal;
+ ident 
+───────
+(0 rows)
+
+--# thelyfsoshort@[local]/~
+SELECT * FROM cat;
+ license │ responds_to │ doglike
+─────────┼─────────────┼─────────
+(0 rows)
+```
+
+The `variants.variant()` function is basically a SQL macro; it sets up several
+triggers every time it is called. Let's add a `cat`:
+
+```sql
+--# thelyfsoshort@[local]/~ 
+INSERT INTO cat VALUES ('00000000-0000-0000-0000-000000000001', 'felix', FALSE);
+INSERT 0 1
+```
+
+The triggers ensure that records are added to the `animal` table, as well.
+
+```sql
+--# thelyfsoshort@[local]/~
+SELECT * FROM cat;
+               license                │ responds_to │ doglike
+──────────────────────────────────────┼─────────────┼─────────
+ 00000000-0000-0000-0000-000000000001 │ felix       │ f
+(1 row)
+
+--# thelyfsoshort@[local]/~
+SELECT * FROM animal;
+                ident                 
+──────────────────────────────────────
+ 00000000-0000-0000-0000-000000000001
+(1 row)
+```
+
+In addition to the triggers, `variants.variant()` also maintains a join table,
+with one column for each variant type. In this case, the join table is named
+`animal*`:
+
+```sql
+--# thelyfsoshort@[local]/~
+SELECT * FROM "animal*";
+Time: 0.285 ms
+─[ RECORD 1 ]──────────────────────────────────────────
+ident  │ 00000000-0000-0000-0000-000000000001
+type   │ cat
+cat    │ (00000000-0000-0000-0000-000000000001,felix,f)
+walrus │ \N
+dog    │ \N
+(1 row)
+```
+
+The join table illustrates a cool Postgres features: columns with row types.
+
+What good is a `cat`? Better delete while we're not sure:
+
+```sql
+--# thelyfsoshort@[local]/~
+DELETE FROM cat;
+DELETE 1
+```
+
+No more `cat`s, no more `animal*`s:
+
+```sql
+--# thelyfsoshort@[local]/~
+SELECT * FROM cat;
+ license │ responds_to │ doglike
+─────────┼─────────────┼─────────
+(0 rows)
+
+--# thelyfsoshort@[local]/~
+SELECT * FROM "animal*";
+ ident │ type │ cat │ walrus │ dog
+───────┼──────┼─────┼────────┼─────
+(0 rows)
+```
+
+Our Approach to Variant Types in Postgres
+=========================================
 
 Typed variants, case classes, tagged unions, algebraic data types or
 just [enums]: variant types are a feature common to many programming languages
